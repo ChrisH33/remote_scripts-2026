@@ -6,29 +6,22 @@ Google Drive folder, and moves them to a "Processed" subfolder.
 Sends a Slack summary after each batch.
 """
 
-# stdlib
+# stdlib imports
 import os
 import sys
 import time
 from pathlib import Path
 from typing import List
-
-# third-party
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from dotenv import load_dotenv
 
-# internal
+# internal imports
 from config import load_var, logger
 from file_mover import move_to_processed, upload_file_to_google
 
-# Shared project utilities
-project_root = Path(__file__).parent.parent.resolve()
-sys.path.append(str(project_root))
-
-# BUG FIX: UniFunction no longer exists — prod_mode() lives in utils.config
+# universal imports
 from utils.config import prod_mode
 from utils.slack_wrapper import SlackClientWrapper
 
