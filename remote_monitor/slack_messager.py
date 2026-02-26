@@ -10,14 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-# Make sure the project root is on the path so sibling packages resolve
-project_root = Path(__file__).parent.parent.resolve()
-sys.path.append(str(project_root))
-
-# BUG FIX: `import UniFunction` / `UniFunction.prod_mode()` does not exist.
-# prod_mode() is defined in utils/config.py — import it from there instead.
+# universal modules
 from utils.config import prod_mode
 from utils.slack_wrapper import SlackClientWrapper
 
@@ -29,13 +22,13 @@ from process_scan import get_active_scripts
 # =============================================================================
 # Initialise config & Slack client
 # =============================================================================
-config       = load_var()
+config = load_var()
 slack_wrapper = SlackClientWrapper(bot_token=config.slack_bot_token)
 
 # Post the initial (empty) dashboard message and keep its timestamp so we can
 # update the same message on every iteration instead of spamming new ones.
 blocks = build_slack_blocks(config.status_header, config.max_blocks, config.emoji_map)
-ts     = slack_wrapper.send_message(channel=config.channel_id, text="Remote monitor", blocks=blocks)
+ts = slack_wrapper.send_message(channel=config.channel_id, text="Remote monitor", blocks=blocks)
 
 # =============================================================================
 # Main monitoring loop
