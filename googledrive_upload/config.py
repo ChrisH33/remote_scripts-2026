@@ -6,26 +6,27 @@ All environment validation runs on import so the script fails fast before
 any network or API calls are made.
 """
 
-# stdlib imports
+# std modules
 import platform
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
+from typing import List
 
 # universal imports
-from utils.config import require_env, dir_exists, file_exists, logger
+from utils.config import dir_exists, file_exists, logger, require_env
 
-# -------------------------------------------------
+# ---------------------------------------------------------------------------
 # Environment variables
-# -------------------------------------------------
+# ---------------------------------------------------------------------------
 
 SLACK_BOT_TOKEN = require_env("SLACK_BOT_TOKEN")
 CHANNEL_ID      = require_env("SLACK_CHANNEL_RemoteLog")
 SCOPES          = require_env("SCOPES").split(",")
 FOLDER_ID       = require_env("MAVE_DRIVE_FOLDER_ID")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Platform-specific paths
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 LINUX_PREFIX   = Path("/mnt/dna_pipelines")
 WINDOWS_PREFIX = Path("W:/")
@@ -41,20 +42,24 @@ BASE_PREFIX   = LINUX_PREFIX if platform.system() == "Linux" else WINDOWS_PREFIX
 NETWORK_DIR   = BASE_PREFIX / DNAP_NETWORK_SUBDIR
 PROCESSED_DIR = NETWORK_DIR / "Processed"
 
-# =============================================================================
-# Local files
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Local credential files
+# ---------------------------------------------------------------------------
 
 BASE_DIR         = Path(__file__).parent.resolve()
 CREDENTIALS_FILE = BASE_DIR / "credentials.json"
 TOKEN_FILE       = BASE_DIR / "token.json"
 
+# credentials.json must exist
 file_exists(CREDENTIALS_FILE, "Google credentials file")
-file_exists(TOKEN_FILE, "Google token file")
 
-# =============================================================================
-# Validation (runs on import — fails fast before any API calls)
-# =============================================================================
+#  token.json must exist
+if TOKEN_FILE.exists():
+    file_exists(TOKEN_FILE, "Google token file")
+
+# ---------------------------------------------------------------------------
+# Directory validation  (runs on import — fails fast before any API calls)
+# ---------------------------------------------------------------------------
 
 logger.info("Validating environment...")
 
@@ -70,32 +75,45 @@ except PermissionError as e:
 
 logger.info("Environment validation successful")
 
-# -------------------------------------------------
-# Config dataclass
-# -------------------------------------------------
+# ---------------------------------------------------------------------------
+# Config dataclass  (frozen = immutable after construction)
+# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Config:
-    refresh_rate:           int
-    network_dir:            Path
-    processed_network_dir:  Path
-    credentials:            Path
-    google_token:           Path
-    slack_bot_token:        str
-    channel_id:             str
-    scopes:                 list
-    mave_folder_id:         str
+    # Paths
+    network_dir:           Path
+    processed_network_dir: Path
+    credentials:           Path
+    google_token:          Path
+
+    # Google Drive
+    scopes:        List[str]
+    mave_folder_id: str
+
+    # Slack
+    slack_bot_token: str
+    channel_id:      str
+
+    # Timing
+    refresh_rate: int   # seconds between directory scans
+
+    # Startup / shutdown messages
+    startup_message:  str
+    shutdown_message: str
 
 
 def load_var() -> Config:
     return Config(
-        refresh_rate=15,
         network_dir=NETWORK_DIR,
         processed_network_dir=PROCESSED_DIR,
         credentials=CREDENTIALS_FILE,
         google_token=TOKEN_FILE,
-        slack_bot_token=SLACK_BOT_TOKEN,
-        channel_id=CHANNEL_ID,
         scopes=SCOPES,
         mave_folder_id=FOLDER_ID,
+        slack_bot_token=SLACK_BOT_TOKEN,
+        channel_id=CHANNEL_ID,
+        refresh_rate=15,
+        startup_message="🟢 Drive uploader online",
+        shutdown_message="🔴 Drive uploader offline",
     )
