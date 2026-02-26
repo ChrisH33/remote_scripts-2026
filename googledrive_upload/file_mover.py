@@ -36,8 +36,6 @@ def move_to_processed(file_path: str, dir: str) -> bool:
         return False
     try:
         file_name = os.path.basename(file_path)
-        # BUG FIX: `os.path.join(dir, os.path.join(file_name))` had a
-        # pointless inner os.path.join call that did nothing.
         dest_path = os.path.join(dir, file_name)
         shutil.move(file_path, dest_path)
         logger.info(f"Moved {file_name} → {dir}")

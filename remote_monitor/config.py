@@ -1,8 +1,25 @@
+"""
+config.py
+---------
+Loads, validates, and exposes configuration for the Remote Monitor.
+All environment validation runs on import so the script fails fast before
+any network or API calls are made.
+"""
+
+# stdlib imports
 from datetime import timedelta
 from dataclasses import dataclass
 from typing import Dict
-from dotenv import load_dotenv
+
+# universal imports
 from utils.config import require_env
+
+# -------------------------------------------------
+# Environment variables
+# -------------------------------------------------
+
+SLACK_BOT_TOKEN = require_env("SLACK_BOT_TOKEN")
+CHANNEL_ID      = require_env("SLACK_CHANNEL_RemoteLog")
 
 # -------------------------------------------------
 # Shared mutable state (used across modules)
@@ -14,19 +31,13 @@ script_history:     dict[str, list] = {}  # script_name → list of datetime sta
 block_start_time:   dict[str, object] = {} # script_name → datetime of last state change
 
 # -------------------------------------------------
-# Environment variables
-# -------------------------------------------------
-load_dotenv()
-SLACK_BOT_TOKEN = require_env("SLACK_BOT_TOKEN")
-CHANNEL_ID      = require_env("SLACK_CHANNEL_RemoteLog")
-
-# -------------------------------------------------
 # Config dataclass
 # -------------------------------------------------
+
 @dataclass(frozen=True)
 class Config:
     max_blocks:    int
-    cycle_time:    timedelta   # BUG FIX: was annotated as `int` but assigned a timedelta
+    cycle_time:    timedelta
     refresh_rate:  int
     keywords:      list[str]
     status_header: str
