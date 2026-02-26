@@ -5,15 +5,29 @@ Builds Slack Block Kit payloads and manages the in-memory state that
 tracks which Python scripts are running on the remote machine.
 
 Shared state (active_block_state, script_history, block_start_time) lives
-in config.py and is imported here so that all modules mutate the *same* dicts.
+in config.py and is imported here so all modules mutate the *same* dicts.
 """
 
+# std modules
 from datetime import datetime, timedelta
 
-# BUG FIX: this file was an exact copy-paste of config.py.
-# It must import shared state from config (not redefine it),
-# otherwise mutations here would be invisible to slack_messager.py.
-from config import active_block_state, script_history, block_start_time
+# local modules
+from config import active_block_state, block_start_time, script_history
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _format_elapsed(start: datetime) -> str:
+    """Return a human-readable elapsed time string, e.g. '  `5m 12s`'."""
+    elapsed = datetime.now() - start
+    total_secs = int(elapsed.total_seconds())
+    mins, secs = divmod(total_secs, 60)
+    hours, mins = divmod(mins, 60)
+
+    if hours:
+        return f"  `{hours}h {mins}m`"
+    return f"  `{mins}m {secs}s`"
 
 
 # ---------------------------------------------------------------------------
@@ -24,10 +38,10 @@ def build_slack_blocks(status_header: str, max_blocks: int, emoji_map: dict) -> 
     """
     Assemble a Slack Block Kit payload from the current active_block_state.
 
-    Returns a list of block dicts ready to pass to chat.postMessage / chat.update.
+    Returns a list of block dicts ready to pass to chat.postMessage /
+    chat.update.  The list is always valid even when no scripts are running.
     """
-    blocks = [
-        # ── Header row ──────────────────────────────────────────────────────
+    blocks: list[dict] = [
         {
             "type": "header",
             "text": {"type": "plain_text", "text": status_header, "emoji": True},
@@ -35,20 +49,13 @@ def build_slack_blocks(status_header: str, max_blocks: int, emoji_map: dict) -> 
         {"type": "divider"},
     ]
 
-    # Grab at most max_blocks entries so we never exceed Slack's 50-block limit
+    # Cap at max_blocks to stay within Slack's 50-block hard limit
     visible = list(active_block_state.items())[:max_blocks]
 
     for script_name, status in visible:
         emoji    = emoji_map.get(status, emoji_map["grey"])
         start_dt = block_start_time.get(script_name)
-
-        # Show how long the script has been in its current state
-        if start_dt:
-            elapsed = datetime.now() - start_dt
-            mins, secs = divmod(int(elapsed.total_seconds()), 60)
-            time_str = f"  `{mins}m {secs}s`"
-        else:
-            time_str = ""
+        time_str = _format_elapsed(start_dt) if start_dt else ""
 
         blocks.append({
             "type": "section",
@@ -58,7 +65,6 @@ def build_slack_blocks(status_header: str, max_blocks: int, emoji_map: dict) -> 
             },
         })
 
-    # Friendly fallback when nothing is running
     if not visible:
         blocks.append({
             "type": "section",
@@ -76,39 +82,44 @@ def update_live_status(currently_active: set[str], cycle_time: timedelta) -> Non
     """
     Reconcile active_block_state with the set of scripts seen right now.
 
-    Rules:
-    - Script just appeared  → mark green, record start time
-    - Script still running  → keep green (no change)
-    - Script disappeared    → mark red, record the stop time
-    - Script has been red for >= cycle_time → remove it entirely
+    Transitions:
+    - New script detected       → green, record start time, append to history
+    - Script still running      → ensure green (re-greenify if it came back)
+    - Script disappeared        → red, record stop time
+    - Script red for ≥ cycle_time → remove entirely
     """
     now = datetime.now()
 
-    # ── Handle scripts that are currently running ────────────────────────
+    # ── Scripts that are currently running ──────────────────────────────
     for script in currently_active:
-        if script not in active_block_state:
+        current_status = active_block_state.get(script)
+
+        if current_status is None:
             # First time we see this script
             active_block_state[script] = "green"
             block_start_time[script]   = now
             script_history.setdefault(script, []).append(now)
-        else:
-            # Already tracked — make sure colour is green (could have been red)
-            if active_block_state[script] != "green":
-                active_block_state[script] = "green"
-                block_start_time[script]   = now
 
-    # ── Handle scripts that are no longer running ────────────────────────
+        elif current_status != "green":
+            # Script was red (briefly stopped and restarted) — re-greenify
+            active_block_state[script] = "green"
+            block_start_time[script]   = now
+            script_history.setdefault(script, []).append(now)
+
+        # else: already green and still running — nothing to do
+
+    # ── Scripts that are no longer running ──────────────────────────────
     for script in list(active_block_state.keys()):
         if script in currently_active:
-            continue  # still running, handled above
+            continue
 
         if active_block_state[script] == "green":
-            # Script just stopped — flag it red and note when it stopped
+            # Just stopped — flag red
             active_block_state[script] = "red"
             block_start_time[script]   = now
 
         elif active_block_state[script] == "red":
-            # Already red — check whether it has lingered long enough to remove
+            # Already red — evict once the linger period expires
             stopped_at = block_start_time.get(script)
             if stopped_at and (now - stopped_at) >= cycle_time:
                 del active_block_state[script]
@@ -116,16 +127,28 @@ def update_live_status(currently_active: set[str], cycle_time: timedelta) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Block rollover
+# Block rollover  (overflow eviction)
 # ---------------------------------------------------------------------------
 
 def rollover_blocks(state: dict, max_blocks: int) -> None:
     """
-    Evict the oldest entries when the number of tracked scripts exceeds
-    max_blocks. Python dicts preserve insertion order (3.7+), so the first
-    key is always the oldest.
+    Evict the oldest entries when tracked scripts exceed max_blocks.
+
+    Python dicts preserve insertion order (3.7+), so the first key is
+    always the oldest.  Prefer evicting red (stopped) entries first to
+    avoid hiding scripts that are still running.
     """
+    # First pass: prefer evicting stale red entries
+    if len(state) > max_blocks:
+        red_keys = [k for k, v in state.items() if v == "red"]
+        for key in red_keys:
+            if len(state) <= max_blocks:
+                break
+            del state[key]
+            block_start_time.pop(key, None)
+
+    # Second pass: fall back to oldest-first eviction
     while len(state) > max_blocks:
-        oldest = next(iter(state))   # oldest inserted key
+        oldest = next(iter(state))
         del state[oldest]
-        block_start_time.pop(oldest, None)   # clean up companion dict
+        block_start_time.pop(oldest, None)

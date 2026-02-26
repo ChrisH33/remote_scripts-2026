@@ -1,59 +1,132 @@
 """
 slack_messager.py
 -----------------
-Entry point for the remote monitor.  Initialises Slack, then loops
-every `refresh_rate` seconds to scan running processes and push an
-updated Block Kit message to the configured channel.
+Entry point for the Remote Monitor.
+
+Lifecycle
+---------
+1.  Post the initial (empty) dashboard to Slack and capture its timestamp.
+2.  Loop every `refresh_rate` seconds:
+      a. Scan running Python processes.
+      b. Update in-memory green/red state.
+      c. Trim oldest entries if over the display limit.
+      d. Push the updated Block Kit payload to the same Slack message.
+3.  On clean exit (SIGTERM, SIGINT, or dev-mode break) update the dashboard
+    to show the monitor is offline so the team knows the data is stale.
+
+Dev / non-Linux behaviour
+--------------------------
+On non-Linux machines `prod_mode()` returns False and the loop runs exactly
+once.  This lets you test locally without an infinite loop — just run the
+script and inspect the Slack message.
 """
 
+# std modules
+import signal
 import sys
 import time
-from pathlib import Path
 
 # universal modules
-from utils.config import prod_mode
+from utils.config import prod_mode, logger
 from utils.slack_wrapper import SlackClientWrapper
 
-# Local modules
+# local modules
 from config import load_var, active_block_state
-from message_builder import build_slack_blocks, update_live_status, rollover_blocks
+from message_builder import build_slack_blocks, rollover_blocks, update_live_status
 from process_scan import get_active_scripts
 
-# =============================================================================
-# Initialise config & Slack client
-# =============================================================================
-config = load_var()
-slack_wrapper = SlackClientWrapper(bot_token=config.slack_bot_token)
+# ---------------------------------------------------------------------------
+# Graceful shutdown
+# ---------------------------------------------------------------------------
 
-# Post the initial (empty) dashboard message and keep its timestamp so we can
-# update the same message on every iteration instead of spamming new ones.
-blocks = build_slack_blocks(config.status_header, config.max_blocks, config.emoji_map)
-ts = slack_wrapper.send_message(channel=config.channel_id, text="Remote monitor", blocks=blocks)
+_shutdown_requested = False
 
-# =============================================================================
-# Main monitoring loop
-# =============================================================================
-while True:
-    # 1. Find which Python scripts are currently running on this machine
-    currently_active_scripts = get_active_scripts(config.keywords)
+def _request_shutdown(signum, frame):
+    global _shutdown_requested
+    logger.info(f"Received signal {signum} — shutting down after current cycle.")
+    _shutdown_requested = True
 
-    # 2. Update in-memory state (green / red / remove) based on what's running
-    update_live_status(currently_active_scripts, config.cycle_time)
+signal.signal(signal.SIGTERM, _request_shutdown)
+signal.signal(signal.SIGINT,  _request_shutdown)
 
-    # 3. Trim the oldest entries if we've exceeded the display limit
-    rollover_blocks(active_block_state, config.max_blocks)
+# ---------------------------------------------------------------------------
+# Initialise config and Slack
+# ---------------------------------------------------------------------------
 
-    # 4. Rebuild the Block Kit payload and push it to Slack
-    blocks = build_slack_blocks(config.status_header, config.max_blocks, config.emoji_map)
-    slack_wrapper.update_message(
-        message_ts=ts,
-        channel=config.channel_id,
-        text="Remote monitor",
+Config = load_var()
+slack  = SlackClientWrapper(bot_token=Config.slack_bot_token)
+
+# ── Post initial dashboard — bail out if this fails ──────────────────
+blocks = build_slack_blocks(Config.status_header, Config.max_blocks, Config.emoji_map)
+ts = None
+for attempt in range(1, 4):
+    ts = slack.send_message(
+        channel=Config.channel_id,
+        text=Config.startup_message,
         blocks=blocks,
     )
-
-    # 5. On non-Linux machines (dev) run only once so the loop can be tested
-    if not prod_mode():
+    if ts:
+        logger.info(f"Dashboard posted (ts={ts})")
         break
+    logger.warning(f"Initial post attempt {attempt}/3 failed — retrying in 5s")
+    time.sleep(5)
 
-    time.sleep(config.refresh_rate)
+if not ts:
+    logger.error("Could not post initial dashboard after all retries — exiting.")
+    sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
+
+try:
+    while not _shutdown_requested:
+        # 1. Discover currently running Python scripts
+        currently_active = get_active_scripts(Config.keywords)
+
+        # 2. Update green / red / evict state
+        update_live_status(currently_active, Config.cycle_time)
+
+        # 3. Trim overflow
+        rollover_blocks(active_block_state, Config.max_blocks)
+
+        # 4. Push updated dashboard to Slack
+        blocks = build_slack_blocks(
+            Config.status_header, Config.max_blocks, Config.emoji_map
+        )
+        slack.update_message(
+            message_ts=ts,
+            channel=Config.channel_id,
+            text="Remote monitor",
+            blocks=blocks,
+        )
+
+        # 5. Break after one cycle on dev machines
+        if not prod_mode():
+            logger.info("Non-Linux environment — exiting after one cycle (dev mode).")
+            break
+
+        time.sleep(Config.refresh_rate)
+
+except Exception:
+    logger.exception("Unexpected error in monitoring loop")
+
+finally:
+    # Always mark the dashboard offline on exit so the team knows data is stale
+    slack.update_message(
+        message_ts=ts,
+        channel=Config.channel_id,
+        text=Config.shutdown_message,
+        blocks=[
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": Config.status_header, "emoji": True},
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": ":red_circle: *Monitor offline* — data is stale"},
+            },
+        ],
+    )
+    logger.info("Dashboard updated to offline state.")
