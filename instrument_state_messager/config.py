@@ -1,18 +1,16 @@
+# std modules
 import sys
 import platform
 from pathlib import Path
 from dataclasses import dataclass
-from dotenv import load_dotenv
 
-project_root = Path(__file__).parent.parent.resolve()
-sys.path.append(str(project_root))
-from UniFunction import require_env, logger, dir_exists
+# universal imports
+from utils.config import require_env, logger, dir_exists
 
 # -------------------------------------------------
 # Environmental Variables
 # -------------------------------------------------
 
-load_dotenv()
 SLACK_BOT_TOKEN = require_env("SLACK_BOT_TOKEN")
 CHANNEL_ID = require_env("SLACK_CHANNEL_InstrumentUpdates")
 
@@ -26,6 +24,7 @@ DNAP_SUBDIR = Path()
 BASE_PREFIX = LINUX_PREFIX if platform.system() == "Linux" else WINDOWS_PREFIX
 NETWORK_DIR = BASE_PREFIX / DNAP_SUBDIR
 NETWORK_DIR = Path("C:/Users/ch33/Documents/Chris")
+
 # -------------------------------------------------
 # Validation (runs on import)
 # -------------------------------------------------

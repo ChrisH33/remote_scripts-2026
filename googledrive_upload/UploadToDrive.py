@@ -44,14 +44,10 @@ from file_mover import move_to_processed, upload_file_to_google
 # ---------------------------------------------------------------------------
 
 _shutdown_requested = False
-
-
 def _request_shutdown(signum, frame):
     global _shutdown_requested
     logger.info(f"Received signal {signum} — shutting down after current cycle.")
     _shutdown_requested = True
-
-
 signal.signal(signal.SIGTERM, _request_shutdown)
 signal.signal(signal.SIGINT,  _request_shutdown)
 
@@ -143,12 +139,11 @@ try:
             ]
         except Exception:
             logger.exception("Error accessing network directory")
-            time.sleep(5)
+            time.sleep(Config.refresh_rate)
             continue
 
         # ── Process each file ─────────────────────────────────────────────
         uploaded_files: List[str] = []
-
         for file_name in files:
             full_path = os.path.join(Config.network_dir, file_name)
 
