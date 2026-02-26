@@ -21,26 +21,29 @@ class SlackClientWrapper:
         self.client, self.app = self._connect()
 
     def _connect(self):
+        last_exc = None
         for attempt in range(1, self.retries + 1):
             try:
                 self.logger.info(f"Connecting to Slack (attempt {attempt}/{self.retries})")
                 client = WebClient(token=self.bot_token)
-                app = App(token=self.bot_token)
-                auth = client.auth_test()
-                self.logger.info(f"Connected to Slack workspace: {auth.get('team')}")
+                app    = App(token=self.bot_token)
+                auth   = client.auth_test()
+                self.logger.debug(f"Connected to Slack workspace: {auth.get('team')}")
                 return client, app
             except SlackApiError as e:
                 self.logger.error(f"Slack API error: {e.response['error']}")
+                last_exc = e
             except Exception as e:
                 self.logger.error(f"Unexpected error during Slack connection: {e}")
+                last_exc = e
             if attempt < self.retries:
                 time.sleep(self.delay)
-        raise ConnectionError("Unable to connect to Slack after retries")
+        raise ConnectionError("Unable to connect to Slack after retries") from last_exc
 
     def _func_with_retries(self, func, payload):
         for attempt in range(1, self.retries + 1):
             try:
-                self.logger.info(f"Slack API call {func.__name__} (attempt {attempt}/{self.retries})")
+                self.logger.debug(f"Slack API call {func.__name__} (attempt {attempt}/{self.retries})")
                 return func(**payload)
             except SlackApiError as e:
                 code = e.response.get("error", "unknown_error")
@@ -59,7 +62,7 @@ class SlackClientWrapper:
         response = self._func_with_retries(self.client.chat_postMessage, payload)
         if response:
             ts = response.get("ts") or response.get("message", {}).get("ts")
-            self.logger.info(f"Slack message sent to {channel} (ts={ts})")
+            self.logger.debug(f"Slack message sent to {channel} (ts={ts})")
         else:
             ts = None 
         return ts    
@@ -70,7 +73,7 @@ class SlackClientWrapper:
             payload["blocks"] = blocks
         response = self._func_with_retries(self.client.chat_update, payload)
         if response:
-            self.logger.info(f"Slack message updated (ts={message_ts})")
+            self.logger.debug(f"Slack message updated (ts={message_ts})")
         return response
     
     def delete_all_messages(self, channel, delay=0.1):
@@ -99,11 +102,11 @@ class SlackClientWrapper:
                     delete_payload = {"channel": channel, "ts": ts}
                     delete_response = self._func_with_retries(self.client.chat_delete, delete_payload)
                     if delete_response:
-                        self.logger.info(f"Slack message deleted (ts={ts})")
+                        self.logger.debug(f"Slack message deleted (ts={ts})")
                         total_deleted += 1
                     time.sleep(delay)
 
-        self.logger.info(f"Finished deleting messages. Total deleted: {total_deleted}")
+        self.logger.debug(f"Finished deleting messages. Total deleted: {total_deleted}")
         return total_deleted
     
     def delete_specific_messages(self, match_text, channel, delay=0.1):
@@ -150,11 +153,11 @@ class SlackClientWrapper:
                 delete_response = self._func_with_retries(self.client.chat_delete, delete_payload)
                 if delete_response:
                     total_deleted += 1
-                    self.logger.info(f"Deleted slack message ts={ts}")
+                    self.logger.debug(f"Deleted slack message ts={ts}")
                     time.sleep(delay)
 
             if not cursor:
                 break
         
-        self.logger.info(f"Finished deleting messages. Total deleted: {total_deleted}")
+        self.logger.debug(f"Finished deleting messages. Total deleted: {total_deleted}")
         return total_deleted

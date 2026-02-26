@@ -25,6 +25,10 @@ script and inspect the Slack message.
 import signal
 import sys
 import time
+from dotenv import load_dotenv
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.resolve()))
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 # universal modules
 from utils.config import prod_mode, logger
