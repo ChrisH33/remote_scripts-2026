@@ -21,10 +21,8 @@ Button action IDs (must match message_builder.create_slack_message):
   buttonTertiary  — feedback (reserved)
 """
 
-from __future__ import annotations
-
+# std modules
 import random
-
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
