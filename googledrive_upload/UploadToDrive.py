@@ -24,12 +24,13 @@ once.  This lets you test locally without an infinite loop.
 # std modules
 import os
 import signal
+import sys
 import time
 from typing import List
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+from dotenv import load_dotenv
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.resolve()))
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 # universal imports
 from utils.config import logger, prod_mode
@@ -38,50 +39,29 @@ from utils.slack_wrapper import SlackClientWrapper
 # local imports
 from config import load_var
 from file_mover import move_to_processed, upload_file_to_google
+from build_drive_service import build_drive_service
 
 # ---------------------------------------------------------------------------
 # Graceful shutdown
 # ---------------------------------------------------------------------------
 
 _shutdown_requested = False
+
 def _request_shutdown(signum, frame):
     global _shutdown_requested
     logger.info(f"Received signal {signum} — shutting down after current cycle.")
     _shutdown_requested = True
+
 signal.signal(signal.SIGTERM, _request_shutdown)
 signal.signal(signal.SIGINT,  _request_shutdown)
 
 # ---------------------------------------------------------------------------
-# Google Drive auth
+# Initialise config, Slack and Google
 # ---------------------------------------------------------------------------
 
-def build_drive_service(config):
-    """
-    Authenticate with Google Drive using stored credentials, refreshing or
-    re-running the OAuth flow as needed.
-
-    Returns a Drive API service object.
-    """
-    creds = None
-
-    # Load cached credentials if they exist
-    if os.path.exists(config.google_token):
-        creds = Credentials.from_authorized_user_file(config.google_token, config.scopes)
-
-    # Refresh or re-authenticate if credentials are missing or expired
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow  = InstalledAppFlow.from_client_secrets_file(config.credentials, config.scopes)
-            creds = flow.run_local_server(port=0)
-
-        # Persist the (possibly refreshed) token so we don't re-auth every run
-        with open(config.google_token, "w") as token:
-            token.write(creds.to_json())
-
-    return build("drive", "v3", credentials=creds)
-
+Config = load_var()
+slack  = SlackClientWrapper(bot_token=Config.slack_bot_token)
+service = build_drive_service(Config)
 
 # ---------------------------------------------------------------------------
 # Retry helper
@@ -113,17 +93,6 @@ def retry(func, *args, retries: int = 3, delay: float = 1.0, **kwargs):
 
     logger.error(f"{func.__name__} failed after {retries} attempts")
     return False
-
-
-# ---------------------------------------------------------------------------
-# Initialise config, Slack, Drive
-# ---------------------------------------------------------------------------
-
-Config = load_var()
-slack  = SlackClientWrapper(bot_token=Config.slack_bot_token)
-slack.send_message(channel=Config.channel_id, text=Config.startup_message)
-
-service = build_drive_service(Config)
 
 # ---------------------------------------------------------------------------
 # Main loop
