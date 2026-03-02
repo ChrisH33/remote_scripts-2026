@@ -30,24 +30,23 @@ def get_active_scripts(keywords: list[str]) -> set[str]:
         try:
             cmd = proc.info["cmdline"]
 
-            # Skip processes with no command line or that aren't Python
             if not cmd or "python" not in os.path.basename(cmd[0]).lower():
+                continue
+
+            # Skip process only if cmd[0] matches unwanted keywords
+            if any(keyword in " ".join(cmd).lower() for keyword in keywords):
                 continue
 
             for arg in cmd[1:]:
                 arg_lower = arg.lower()
 
-                # Skip interpreter flags and noise strings
-                if any(keyword in arg_lower for keyword in keywords):
-                    break   # skip the whole process, not just this arg
-
                 # Only record real .py files that exist on disk
-                if arg_lower.endswith(".py") and os.path.isfile(arg):
+                if arg_lower.endswith(".py"):
                     scripts.add(os.path.splitext(os.path.basename(arg))[0])
                     break   # one script name per process
 
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             # Process vanished or we don't have permission — skip silently
             continue
-
+    print(scripts)
     return scripts
