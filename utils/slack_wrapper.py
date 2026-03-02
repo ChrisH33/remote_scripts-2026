@@ -24,11 +24,11 @@ class SlackClientWrapper:
         last_exc = None
         for attempt in range(1, self.retries + 1):
             try:
-                self.logger.info(f"Connecting to Slack (attempt {attempt}/{self.retries})")
+                self.logger.debug(f"Connecting to Slack (attempt {attempt}/{self.retries})")
                 client = WebClient(token=self.bot_token)
                 app    = App(token=self.bot_token)
                 auth   = client.auth_test()
-                self.logger.debug(f"Connected to Slack workspace: {auth.get('team')}")
+                self.logger.info(f"Connected to Slack workspace: {auth.get('team')}")
                 return client, app
             except SlackApiError as e:
                 self.logger.error(f"Slack API error: {e.response['error']}")
