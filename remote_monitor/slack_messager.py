@@ -25,6 +25,8 @@ script and inspect the Slack message.
 import signal
 import sys
 import time
+from datetime import datetime, timezone
+from datetime import timedelta
 from dotenv import load_dotenv
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
@@ -35,9 +37,9 @@ from utils.config import prod_mode, logger
 from utils.slack_wrapper import SlackClientWrapper
 
 # local modules
-from config import load_var, active_block_state
+from config import load_var, active_block_state, script_history, block_start_time
 from message_builder import build_slack_blocks, rollover_blocks, update_live_status
-from process_scan import get_active_scripts
+from process_scan import get_active_scripts_with_runtime
 
 # ---------------------------------------------------------------------------
 # Graceful shutdown
@@ -66,7 +68,7 @@ ts = None
 for attempt in range(1, 4):
     ts = slack.send_message(
         channel=Config.channel_id,
-        text=Config.startup_message,
+        text="temp",
         blocks=blocks,
     )
     if ts:
@@ -85,19 +87,44 @@ if not ts:
 
 try:
     while not _shutdown_requested:
+        now = datetime.now(timezone.utc)
         # 1. Discover currently running Python scripts
-        currently_active = get_active_scripts(Config.keywords)
+        # {'slack_messager': 4.943387508392334}
+        active_scripts = get_active_scripts_with_runtime(Config.keywords)
 
-        # 2. Update green / red / evict state
-        update_live_status(currently_active, Config.cycle_time)
+        #2. Get state
+        slack_message = []
+        for script, runtime in active_scripts.items():
+            if script not in script_history:
+                script_history[script] = []
+                active_block_state[script] = []
+                block_start_time[script] = runtime
+            
+            last_time = block_start_time.get(script, runtime)
+            if not active_block_state[script] or (now - last_time) >= Config.cycle_time:
+                active_block_state[script].append("green")
+
+        # Scripts that vanished
+        for script in script_history.keys():
+            if script not in active_scripts:
+                last_status = active_block_state.get(script, [])[-1:]
+                if not last_status or last_status[0] != "red":
+                    active_block_state.setdefault(script, []).append("red")
+                    block_start_time[script] = now
+
+        # Scripts that returned after vanish
+        for script in active_scripts:
+            last_status = active_block_state.get(script, [])[-1:]
+            if last_status and last_status[0] == "red":
+                active_block_state[script][-1] = "orange"
+                block_start_time[script] = now
 
         # 3. Trim overflow
         rollover_blocks(active_block_state, Config.max_blocks)
 
         # 4. Push updated dashboard to Slack
         blocks = build_slack_blocks(
-            Config.status_header, Config.max_blocks, Config.emoji_map
-        )
+            Config.status_header, Config.max_blocks, Config.emoji_map)
         slack.update_message(
             message_ts=ts,
             channel=Config.channel_id,
@@ -120,7 +147,7 @@ finally:
     slack.update_message(
         message_ts=ts,
         channel=Config.channel_id,
-        text=Config.shutdown_message,
+        text="temp",
         blocks=[
             {
                 "type": "header",

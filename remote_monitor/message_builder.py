@@ -49,7 +49,7 @@ def build_slack_blocks(status_header: str, max_blocks: int, emoji_map: dict) -> 
         {"type": "divider"},
     ]
 
-    # Cap at max_blocks to stay within Slack's 50-block hard limit
+    # Cap at max_blocks
     visible = list(active_block_state.items())[:max_blocks]
 
     for script_name, status in visible:

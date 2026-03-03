@@ -53,10 +53,6 @@ class Config:
     # Process scanning
     keywords: List[str]          # process command-line substrings to ignore
 
-    # Startup / shutdown messages
-    startup_message:  str        # text posted when the monitor starts
-    shutdown_message: str        # text posted when the monitor stops cleanly
-
 
 def load_var() -> Config:
     return Config(
@@ -78,7 +74,4 @@ def load_var() -> Config:
         # Processes whose command lines contain these strings are ignored.
         # Add more here if you see noise (e.g. Jupyter kernels, pytest workers).
         keywords=["launcher", "debugpy", "pythonw.exe"],
-
-        startup_message="🟢 Remote monitor online",
-        shutdown_message="🔴 Remote monitor offline — dashboard is stale",
     )

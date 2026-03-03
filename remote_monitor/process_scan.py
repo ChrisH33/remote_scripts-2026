@@ -1,52 +1,28 @@
-"""
-process_scan.py
----------------
-Scans the host machine for running Python scripts.
-
-Returns a set of script *names* (without path or .py extension) so they
-can be tracked in the dashboard.  Processes whose command lines contain
-any of the configured `keywords` are ignored (e.g. debuggers, launchers).
-"""
-
 # std modules
 import os
+import time
 import psutil
 
+def get_active_scripts_with_runtime(keywords: list[str]) -> dict[str, float]:
+    scripts = {}
 
-def get_active_scripts(keywords: list[str]) -> set[str]:
-    """
-    Return the base names (no extension) of all Python scripts currently
-    running on this machine, excluding any whose command line contains a
-    keyword from `keywords`.
-
-    Examples
-    --------
-    >>> get_active_scripts(["debugpy", "launcher"])
-    {'my_pipeline', 'data_sync'}
-    """
-    scripts: set[str] = set()
-
-    for proc in psutil.process_iter(["cmdline"]):
+    for proc in psutil.process_iter(["cmdline", "create_time"]):
         try:
             cmd = proc.info["cmdline"]
-
             if not cmd or "python" not in os.path.basename(cmd[0]).lower():
                 continue
-
-            # Skip process only if cmd[0] matches unwanted keywords
             if any(keyword in " ".join(cmd).lower() for keyword in keywords):
                 continue
 
             for arg in cmd[1:]:
-                arg_lower = arg.lower()
+                if arg.lower().endswith(".py"):
+                    name = os.path.splitext(os.path.basename(arg))[0]
+                    runtime = time.time() - proc.info["create_time"]
 
-                # Only record real .py files that exist on disk
-                if arg_lower.endswith(".py"):
-                    scripts.add(os.path.splitext(os.path.basename(arg))[0])
-                    break   # one script name per process
+                    scripts[name] = runtime
+                    break
 
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            # Process vanished or we don't have permission — skip silently
             continue
-    print(scripts)
+
     return scripts
