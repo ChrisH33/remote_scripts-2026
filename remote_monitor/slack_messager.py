@@ -61,7 +61,7 @@ Config = load_var()
 slack  = SlackClientWrapper(bot_token=Config.slack_bot_token)
 
 # ── Post initial dashboard — bail out if this fails ──────────────────
-blocks = build_slack_blocks(Config.status_header, Config.emoji_map)
+blocks = build_slack_blocks(Config.status_header,Config.max_blocks, Config.emoji_map)
 ts = None
 for attempt in range(1, 4):
     ts = slack.send_message(
@@ -89,7 +89,7 @@ try:
 
         update_live_status(active_scripts, Config.max_blocks, Config.cycle_time)
 
-        blocks = build_slack_blocks(Config.status_header, Config.emoji_map)
+        blocks = build_slack_blocks(Config.status_header, Config.max_blocks, Config.emoji_map)
         slack.update_message(
             message_ts=ts,
             channel=Config.channel_id,

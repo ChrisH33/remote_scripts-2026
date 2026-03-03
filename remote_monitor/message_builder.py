@@ -24,17 +24,6 @@ def update_live_status(
     max_blocks: int,
     cycle_time: timedelta,
 ) -> None:
-    """
-    Append one colour block to every tracked script this cycle, then trim.
-
-    Colour rules:
-      green  — script is running now
-      red    — script was running last cycle, now gone
-      orange — script was red last cycle and has come back
-    
-    `currently_active` is the dict from get_active_scripts_with_runtime:
-      { script_name: runtime_in_seconds }
-    """
     now = datetime.now()
     all_scripts = set(active_block_state.keys()) | set(currently_active.keys())
 
@@ -42,39 +31,23 @@ def update_live_status(
         prev_status = active_block_state.get(script)
 
         if script in currently_active:
-            if prev_status == "red":
-                new_status = "orange"   # came back after dropping off
-            else:
-                new_status = "green"    # running normally (or first seen)
-
-            # Back-fill real start time on first appearance
+            new_status = "orange" if prev_status == "red" else "green"
             if script not in block_start_time:
                 runtime = currently_active[script]
                 block_start_time[script] = now - timedelta(seconds=runtime)
         else:
-            new_status = "red"          # was tracked, now gone
+            new_status = "red"
 
-        # Update current status
         active_block_state[script] = new_status
 
-        # Append to rolling history and shift left if over the limit
+        # Prepend newest block on the left, trim oldest on the right
         history = script_history.setdefault(script, [])
-        history.append(new_status)
+        history.insert(0, new_status)
         if len(history) > max_blocks:
-            history.pop(0)
+            history.pop()
 
 
-# ---------------------------------------------------------------------------
-# Block builder
-# ---------------------------------------------------------------------------
-
-def build_slack_blocks(status_header: str, emoji_map: dict) -> list:
-    """
-    Assemble the Slack Block Kit payload from the current script_history.
-
-    Each script gets one line:
-        *script_name*  :green: :green: :red: :green:
-    """
+def build_slack_blocks(status_header: str, max_blocks: int, emoji_map: dict) -> list:
     blocks: list[dict] = [
         {
             "type": "header",
@@ -91,12 +64,18 @@ def build_slack_blocks(status_header: str, emoji_map: dict) -> list:
         return blocks
 
     for script, history in script_history.items():
-        emoji_str = "  ".join(emoji_map.get(s, emoji_map["grey"]) for s in history)
+        # Pad right with grey until we reach max_blocks
+        padded = history + ["grey"] * (max_blocks - len(history))
+        emoji_str = "".join(emoji_map.get(s, emoji_map["grey"]) for s in padded)
+
+        last_update = block_start_time.get(script)
+        ts_str = last_update.strftime("%Y-%m-%d %H:%M:%S") if last_update else "unknown"
+
         blocks.append({
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*{script}*   {emoji_str}",
+                "text": f"*{script}*\n{emoji_str}\nlast update: `{ts_str}`",
             },
         })
 
