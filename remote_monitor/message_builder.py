@@ -75,7 +75,7 @@ def build_slack_blocks(status_header: str, max_blocks: int, emoji_map: dict) -> 
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*{script}*\n{emoji_str}\nlast update: `{ts_str}`",
+                "text": f"*{script}*\n{emoji_str}\nstart time: `{ts_str}`",
             },
         })
 
