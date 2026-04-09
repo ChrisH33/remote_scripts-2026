@@ -14,6 +14,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def prod_mode():
+    """
+    Returns True for Linux-based systems
+    """
     if platform.system() == "Linux":
         return True
     else:
@@ -25,11 +28,11 @@ def require_env(name: str) -> str:
     """
     try:
         value = os.environ[name]
+        
     except KeyError as e:
         raise RuntimeError(
             f"Required environment variable '{name}' is not set"
         ) from e
-
     if not value or value.strip().lower() == "none":
         raise RuntimeError(
             f"Environment variable '{name}' is set but empty or None"
